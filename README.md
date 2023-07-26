@@ -127,6 +127,35 @@ Use `category` to group similar feeds together.
 }
 ```
 
+## Usage with gokrazy
+
+Add the forked repo to the gokrazy instace
+
+``` bash
+$ gok -i brun0-pi add ~/Desktop/personal/rssole/cmd/rssole/
+```
+
+Then use this in the gokrazy Config
+
+``` json
+  "github.com/TheMightyGit/rssole/cmd/rssole": {
+    "CommandLineFlags": [
+      "-gokrazy",
+      "-c=/perm/home/rssole/feeds.json",
+      "-r=/perm/home/rssole/readcache.json"
+    ],
+    "ExtraFilePaths": {
+      "/etc/rssole/feeds.json": "/home/brun0/gokrazy/brun0-pi/rssole/feeds.json",
+      "/etc/rssole/readcache.json": "/home/brun0/gokrazy/brun0-pi/rssole/readcache.json"
+    }
+  }
+```
+
+After this just update the gokrazy instance and that should word out of the box
+
+``` bash
+gok update -i brun0-pi
+```
 
 ## Key Dependencies
 
