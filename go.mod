@@ -1,4 +1,4 @@
-module github.com/BrunoTeixeira1996/rssole
+module github.com/TheMightyGit/rssole
 
 go 1.20
 
