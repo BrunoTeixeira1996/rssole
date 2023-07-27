@@ -43,7 +43,6 @@ func getFeedsFileConfigSection(filename string) configSection {
 
 func main() {
 	var configFilename, configReadCacheFilename string
-	var err error
 
 	flag.StringVar(&configFilename, "c", "feeds.json", "config filename")
 	flag.StringVar(&configReadCacheFilename, "r", "readcache.json", "readcache location")
@@ -57,8 +56,10 @@ func main() {
 		errReadCache := cp.Copy("/etc/rssole/readcache.json", "/perm/home/rssole/readcache.json")
 
 		// If there is an error we should exit
-		if errFeeds != nil || errReadCache != nil {
-			log.Fatal(err)
+		if errFeeds != nil {
+			log.Fatal(errFeeds)
+		} else if errReadCache != nil {
+			log.Fatal(errReadCache)
 		}
 	}
 
