@@ -12,17 +12,15 @@ import (
 	"github.com/mmcdole/gofeed"
 )
 
-var (
-	testItem1 = &wrappedItem{
-		IsUnread: false,
-		Feed:     &feed{},
-		Item: &gofeed.Item{
-			Title:       "Story 1 Title",
-			Description: "Story 1 Description",
-			Link:        "http://example.com/story/1",
-		},
-	}
-)
+var testItem1 = &wrappedItem{
+	IsUnread: false,
+	Feed:     &feed{},
+	Item: &gofeed.Item{
+		Title:       "Story 1 Title",
+		Description: "Story 1 Description",
+		Link:        "http://example.com/story/1",
+	},
+}
 
 func init() {
 	// We need the templates lodaed for endpoint tests.
@@ -43,14 +41,13 @@ func init() {
 	})
 }
 
-var (
-	readCacheDir string
-)
+var readCacheDir string
 
-func setUpTearDown(t *testing.T) func(t *testing.T) {
+func setUpTearDown(_ *testing.T) func(t *testing.T) {
 	// We don't want to make a mess of the local fs
 	// so clobber the readcache with one that uses a tmp file.
 	var err error
+
 	readCacheDir, err = os.MkdirTemp("", "Test_Endpoints")
 	if err != nil {
 		log.Fatal(err)
@@ -74,7 +71,7 @@ func setUpTearDown(t *testing.T) func(t *testing.T) {
 func TestIndex(t *testing.T) {
 	defer setUpTearDown(t)(t)
 
-	req, err := http.NewRequest("GET", "/", nil)
+	req, err := http.NewRequest(http.MethodGet, "/", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -108,7 +105,7 @@ func TestIndex(t *testing.T) {
 func TestFeedlist(t *testing.T) {
 	defer setUpTearDown(t)(t)
 
-	req, err := http.NewRequest("GET", "/feeds", nil)
+	req, err := http.NewRequest(http.MethodGet, "/feeds", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -142,7 +139,7 @@ func TestFeedlist(t *testing.T) {
 func TestItemsGet(t *testing.T) {
 	defer setUpTearDown(t)(t)
 
-	req, err := http.NewRequest("GET", "/items?url=http://example.com/yay_feed", nil)
+	req, err := http.NewRequest(http.MethodGet, "/items?url=http://example.com/yay_feed", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -166,6 +163,7 @@ func TestItemsGet(t *testing.T) {
 		"Mark All Read",
 		"Story 1 Title",
 		"Story 1 Description",
+		"http://example.com/story/1",
 	} {
 		if !strings.Contains(rr.Body.String(), expectedToFind) {
 			t.Errorf("handler returned page without expected content: got %v could not find '%v'",
@@ -183,10 +181,12 @@ func TestItemsPostMarkAsRead(t *testing.T) {
 	data.Add("read", "http://example.com/story/99")
 
 	body := strings.NewReader(data.Encode())
-	req, err := http.NewRequest("POST", "/items?url=http://example.com/yay_feed", body)
+
+	req, err := http.NewRequest(http.MethodPost, "/items?url=http://example.com/yay_feed", body)
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	req.Header.Add("Content-Type", "application/x-www-form-urlencoded")
 
 	// We create a ResponseRecorder (which satisfies http.ResponseWriter) to record the response.
@@ -208,6 +208,7 @@ func TestItemsPostMarkAsRead(t *testing.T) {
 		"Mark All Read",
 		"Story 1 Title",
 		"Story 1 Description",
+		"http://example.com/story/1",
 	} {
 		if !strings.Contains(rr.Body.String(), expectedToFind) {
 			t.Errorf("handler returned page without expected content: got %v could not find '%v'",
@@ -223,8 +224,9 @@ func TestItemsPostMarkAsRead(t *testing.T) {
 func TestItem(t *testing.T) {
 	defer setUpTearDown(t)(t)
 
-	storyId := testItem1.ID()
-	req, err := http.NewRequest("GET", "/item?id="+storyId+"&url=http://example.com/yay_feed", nil)
+	storyID := testItem1.ID()
+
+	req, err := http.NewRequest(http.MethodGet, "/item?id="+storyID+"&url=http://example.com/yay_feed", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -245,7 +247,6 @@ func TestItem(t *testing.T) {
 
 	for _, expectedToFind := range []string{
 		"Story 1 Description",
-		"http://example.com/story/1",
 	} {
 		if !strings.Contains(rr.Body.String(), expectedToFind) {
 			t.Errorf("handler returned page without expected content: got\n%v\ncould not find '%v'",

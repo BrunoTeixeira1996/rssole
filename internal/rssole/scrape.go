@@ -25,14 +25,24 @@ func (conf *scrape) GeneratePseudoRssFeed() (string, error) {
 `
 
 	for _, url := range conf.URLs {
+		if url == "" {
+			continue
+		}
+
 		resp, err := http.Get(url)
 		if err != nil {
 			return "", fmt.Errorf("get %s %w", url, err)
 		}
+
 		if resp.StatusCode < 200 || resp.StatusCode > 299 {
+			resp.Body.Close()
+
 			return "", fmt.Errorf("get non-success %d %s %w", resp.StatusCode, url, err)
 		}
+
 		doc, err := html.Parse(resp.Body)
+		resp.Body.Close()
+
 		if err != nil {
 			return "", fmt.Errorf("parse %s %w", url, err)
 		}
@@ -42,7 +52,7 @@ func (conf *scrape) GeneratePseudoRssFeed() (string, error) {
 			if titleNode != nil {
 				titleChild := titleNode.FirstChild
 				title := titleChild.Data
-				//title := Query(p, f.Scrape.Title).FirstChild.Data
+				// title := Query(p, f.Scrape.Title).FirstChild.Data
 				link := attrOr(query(p, conf.Link), "href", "(No link available)")
 				itemRss := `  <item>
     <title>` + title + `</title>
@@ -66,6 +76,7 @@ func query(n *html.Node, query string) *html.Node {
 	if err != nil {
 		return &html.Node{}
 	}
+
 	return cascadia.Query(n, sel)
 }
 
@@ -74,6 +85,7 @@ func queryAll(n *html.Node, query string) []*html.Node {
 	if err != nil {
 		return []*html.Node{}
 	}
+
 	return cascadia.QueryAll(n, sel)
 }
 
@@ -83,5 +95,6 @@ func attrOr(n *html.Node, attrName, or string) string {
 			return a.Val
 		}
 	}
+
 	return or
 }

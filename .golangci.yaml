@@ -1,0 +1,15 @@
+linters:
+  #enable-all: true
+  enable:
+    - gocritic
+    # - varnamelen
+    - wrapcheck
+    - usestdlibvars
+    - stylecheck
+    # - noctx
+    - nlreturn
+    - gomnd
+    - wsl
+    - revive
+    - bodyclose
+    - errorlint
