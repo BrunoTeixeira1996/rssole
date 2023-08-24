@@ -4,12 +4,14 @@ import (
 	"bytes"
 	"crypto/md5"
 	"encoding/hex"
-	"log"
 	"net/url"
+	"regexp"
 	"strings"
+	"sync"
 
 	"github.com/k3a/html2text"
 	"github.com/mmcdole/gofeed"
+	"golang.org/x/exp/slog"
 	"golang.org/x/net/html"
 )
 
@@ -22,6 +24,19 @@ type wrappedItem struct {
 	description                *string
 	descriptionImagesForDedupe *[]string
 	images                     *[]string
+	onceDescription            sync.Once
+}
+
+func (w *wrappedItem) MarkReadID() string {
+	id := w.Link
+	if id == "" {
+		id = w.GUID
+		if id == "" {
+			id = url.QueryEscape(w.Title)
+		}
+	}
+
+	return id
 }
 
 func (w *wrappedItem) Images() []string {
@@ -57,12 +72,34 @@ func (w *wrappedItem) Images() []string {
 		}
 	}
 
+	// youtube style media:group
+	group := w.Item.Extensions["media"]["group"]
+	if len(group) > 0 {
+		thumbnail := group[0].Children["thumbnail"]
+		if len(thumbnail) > 0 {
+			url := thumbnail[0].Attrs["url"]
+			if url != "" {
+				images = append(images, url)
+			}
+		}
+	}
+
+	// also add images found in enclosures
+	for _, enclosure := range w.Enclosures {
+		if strings.HasPrefix(enclosure.Type, "image/") {
+			images = append(images, enclosure.URL)
+		}
+	}
+
 	w.images = &images
 
 	return *w.images
 }
 
 func (w *wrappedItem) isDescriptionImage(src string) bool {
+	// strip anything after ? to get rid of query string part
+	srcNoQueryString := strings.Split(src, "?")[0]
+
 	if w.descriptionImagesForDedupe == nil {
 		// force lazy load if it hasn't already
 		_ = w.Description()
@@ -70,7 +107,7 @@ func (w *wrappedItem) isDescriptionImage(src string) bool {
 
 	for _, v := range *w.descriptionImagesForDedupe {
 		// fmt.Println(v, "==", src)
-		if v == src {
+		if v == srcNoQueryString {
 			return true
 		}
 	}
@@ -78,83 +115,114 @@ func (w *wrappedItem) isDescriptionImage(src string) bool {
 	return false
 }
 
+var (
+	tagsToRemoveRe  = regexp.MustCompile("script|style|link|meta|iframe|form")
+	attrsToRemoveRe = regexp.MustCompile("style|class|hx-.*|data-.*|srcset|width|height|sizes|loading|decoding|target")
+)
+
 func (w *wrappedItem) Description() string {
-	if w.description != nil { // used cached version
-		return *w.description
-	}
+	w.onceDescription.Do(func() {
+		// start with whichever is longer out of .Description or .Content
+		// (sites vary about which they use, we'll take the biggest)
+		desc := &w.Item.Description
+		if len(w.Item.Content) > len(*desc) {
+			desc = &w.Item.Content
+		}
 
-	// try and sanitise any html
-	doc, err := html.Parse(strings.NewReader(w.Item.Description))
-	if err != nil {
-		// ...
-		log.Println(err)
-
-		return w.Item.Description
-	}
-
-	w.descriptionImagesForDedupe = &[]string{}
-	toDelete := []*html.Node{}
-
-	var f func(*html.Node)
-	f = func(n *html.Node) {
-		// fmt.Println(n)
-		if n.Type == html.ElementNode {
-			// fmt.Println(n.Data)
-			if n.Data == "script" || n.Data == "style" || n.Data == "link" || n.Data == "meta" || n.Data == "iframe" {
-				// fmt.Println("removing", n.Data, "tag")
-				toDelete = append(toDelete, n)
-
-				return
-			}
-
-			if n.Data == "a" {
-				// fmt.Println("making", n.Data, "tag target new tab")
-				n.Attr = append(n.Attr, html.Attribute{
-					Namespace: "",
-					Key:       "target",
-					Val:       "_new",
-				})
-				// disable href if it starts with #
-				for i := range n.Attr {
-					if n.Attr[i].Key == "href" && n.Attr[i].Val[0] == '#' {
-						n.Attr[i].Key = "xxxhref" // easier than removing the attr
-
-						break
-					}
-				}
-			}
-
-			if n.Data == "img" || n.Data == "svg" {
-				// fmt.Println("making", n.Data, "tag style max-width 60%")
-				n.Attr = append(n.Attr, html.Attribute{
-					Namespace: "",
-					Key:       "style",
-					Val:       "max-width: 60%;",
-				})
-				// keep a note of images so we can de-dupe attached
-				// images that also appear in the content.
-				for _, a := range n.Attr {
-					if a.Key == "src" {
-						*w.descriptionImagesForDedupe = append(*w.descriptionImagesForDedupe, a.Val)
-					}
+		if len(*desc) == 0 { // uh-ho, no description - is it hidden somewhere else?
+			// youtube style media:group
+			group := w.Item.Extensions["media"]["group"]
+			if len(group) > 0 {
+				description := group[0].Children["description"]
+				if len(description) > 0 {
+					desc = &description[0].Value
 				}
 			}
 		}
 
-		for c := n.FirstChild; c != nil; c = c.NextSibling {
-			f(c)
+		// try and sanitise any html
+		doc, err := html.Parse(strings.NewReader(*desc))
+		if err != nil {
+			// failed to sanitise, so just return as is...
+			slog.Warn("html.Parse failed, returning unsanitised content", "error", err)
+			w.description = desc
+		} else {
+			w.descriptionImagesForDedupe = &[]string{}
+			toDelete := []*html.Node{}
+
+			var f func(*html.Node)
+			f = func(n *html.Node) {
+				// fmt.Println(n)
+				if n.Type == html.ElementNode {
+					// fmt.Println(n.Data)
+
+					if tagsToRemoveRe.MatchString(n.Data) {
+						// fmt.Println("removing", n.Data, "tag")
+						toDelete = append(toDelete, n)
+
+						return
+					}
+
+					allowedAttrs := []html.Attribute{}
+					for i := range n.Attr {
+						if !attrsToRemoveRe.MatchString(n.Attr[i].Key) {
+							allowedAttrs = append(allowedAttrs, n.Attr[i])
+						}
+					}
+					n.Attr = allowedAttrs
+
+					if n.Data == "a" {
+						// fmt.Println("making", n.Data, "tag target new tab")
+						n.Attr = append(n.Attr, html.Attribute{
+							Namespace: "",
+							Key:       "target",
+							Val:       "_new",
+						})
+						// disable href if it starts with #
+						for i := range n.Attr {
+							if n.Attr[i].Key == "href" && n.Attr[i].Val[0] == '#' {
+								n.Attr[i].Key = "xxxhref" // easier than removing the attr
+
+								break
+							}
+						}
+					}
+
+					if n.Data == "img" || n.Data == "svg" {
+						// fmt.Println("making", n.Data, "tag style max-width 60%")
+						n.Attr = append(n.Attr, html.Attribute{
+							Namespace: "",
+							Key:       "style",
+							Val:       "max-width: 60%;",
+						})
+						// keep a note of images so we can de-dupe attached
+						// images that also appear in the content.
+						for _, a := range n.Attr {
+							if a.Key == "src" {
+								// strip anything after ? to get rid of query string part
+								bits := strings.Split(a.Val, "?")
+								*w.descriptionImagesForDedupe = append(*w.descriptionImagesForDedupe, bits[0])
+							}
+						}
+					}
+				}
+
+				for c := n.FirstChild; c != nil; c = c.NextSibling {
+					f(c)
+				}
+			}
+			f(doc)
+
+			for _, n := range toDelete {
+				n.Parent.RemoveChild(n)
+			}
+
+			renderBuf := bytes.NewBufferString("")
+			_ = html.Render(renderBuf, doc)
+			desc := renderBuf.String()
+			w.description = &desc
 		}
-	}
-	f(doc)
-
-	for _, n := range toDelete {
-		n.Parent.RemoveChild(n)
-	}
-
-	renderBuf := bytes.NewBufferString("")
-	_ = html.Render(renderBuf, doc)
-	desc := renderBuf.String()
-	w.description = &desc
+	})
 
 	return *w.description
 }
@@ -166,7 +234,7 @@ func (w *wrappedItem) Summary() string {
 		return *w.summary
 	}
 
-	plainDesc := html2text.HTML2Text(w.Item.Description)
+	plainDesc := html2text.HTML2TextWithOptions(w.Description(), html2text.WithLinksInnerText())
 	if len(plainDesc) > maxDescriptionLength {
 		plainDesc = plainDesc[:maxDescriptionLength]
 	}
@@ -187,7 +255,7 @@ func (w *wrappedItem) Summary() string {
 }
 
 func (w *wrappedItem) ID() string {
-	hash := md5.Sum([]byte(w.Link))
+	hash := md5.Sum([]byte(w.MarkReadID()))
 
 	return hex.EncodeToString(hash[:])
 }

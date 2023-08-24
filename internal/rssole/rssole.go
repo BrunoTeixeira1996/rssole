@@ -4,20 +4,27 @@ import (
 	"embed"
 	"fmt"
 	"io/fs"
-	"log"
 	"net/http"
 	"text/template"
 	"time"
+
+	"github.com/NYTimes/gziphandler"
+	"golang.org/x/exp/slog"
 )
 
 const (
 	templatesDir = "templates"
 )
 
+var Version = "dev"
+
 var (
 	//go:embed templates/*
 	files     embed.FS
 	templates map[string]*template.Template
+
+	//go:embed libs/*
+	wwwlibs embed.FS
 )
 
 var (
@@ -52,6 +59,8 @@ func loadTemplates() error {
 }
 
 func Start(configFilename, configReadCacheFilename, listenAddress string, updateTime time.Duration) error {
+	slog.Info("RiSSOLE", "version", Version)
+
 	err := loadTemplates()
 	if err != nil {
 		return err
@@ -74,11 +83,24 @@ func Start(configFilename, configReadCacheFilename, listenAddress string, update
 	http.HandleFunc("/item", item)
 	http.HandleFunc("/crudfeed", crudfeed)
 
-	log.Printf("Listening on %s\n", listenAddress)
+	// As the static files won't change we force the browser to cache them.
+	httpFS := http.FileServer(http.FS(wwwlibs))
+	http.Handle("/libs/", forceCache(httpFS))
 
-	if err := http.ListenAndServe(listenAddress, nil); err != nil {
+	slog.Info("Listening", "address", listenAddress)
+
+	if err := http.ListenAndServe(listenAddress, gziphandler.GzipHandler(http.DefaultServeMux)); err != nil {
 		return fmt.Errorf("error during ListenAndServe - %w", err)
 	}
 
 	return nil
+}
+
+func forceCache(h http.Handler) http.Handler {
+	fn := func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "max-age=86400") // 24 hours
+		h.ServeHTTP(w, r)
+	}
+
+	return http.HandlerFunc(fn)
 }

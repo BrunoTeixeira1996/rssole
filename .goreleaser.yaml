@@ -1,7 +1,7 @@
 before:
   hooks:
     - go mod tidy
-    - go test ./...
+    - go test -race ./...
 builds:
   - main: ./cmd/rssole/
     env:
@@ -10,6 +10,8 @@ builds:
       - linux
       - windows
       - darwin
+    ldflags:
+      - -s -w -X github.com/TheMightyGit/rssole/internal/rssole.Version={{.Version}}
 
 archives:
   - format: tar.gz
@@ -27,18 +29,37 @@ archives:
       format: zip
     files:
       - feeds.json
+
+brews:
+  -
+    license: "MIT"
+    repository:
+      owner: themightygit
+      name: homebrew-rssole
+      token: "{{ .Env.TAP_GITHUB_TOKEN }}"
+    homepage: 'https://github.com/TheMightyGit/rssole/'
+    description: 'An RSS Reader inspired by the late Google Reader.'
+
+nfpms:
+  - license: "MIT"
+    maintainer: "the.mighty.git@gmail.com"
+    homepage: "https://github.com/TheMightyGit/rssole"
+    description: 'An RSS Reader inspired by the late Google Reader.'
+    formats:
+      - rpm
+      - deb
+      - apk
+      - archlinux
+
 checksum:
   name_template: 'checksums.txt'
+
 snapshot:
   name_template: "{{ incpatch .Version }}-next"
+
 changelog:
   sort: asc
   filters:
     exclude:
       - '^docs:'
       - '^test:'
-
-# The lines beneath this are called `modelines`. See `:help modeline`
-# Feel free to remove those if you don't want/use them.
-# yaml-language-server: $schema=https://goreleaser.com/static/schema.json
-# vim: set ts=2 sw=2 tw=0 fo=cnqoj

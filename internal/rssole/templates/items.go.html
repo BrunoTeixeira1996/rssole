@@ -14,11 +14,10 @@
         <form hx-post="/items?url={{.URL | urlquery}}"
               hx-target="#items"
               hx-indicator="#feedspinner">
-        {{range $idx, $item := .Items}}
-          {{if $item.IsUnread}}
-          <input type="hidden" name="read" value="{{$item.Link}}">
-          {{end}}
-        {{end}}
+        {{- range $idx, $item := .Items -}}
+          {{if $item.IsUnread}}<input type="hidden" name="read" value="{{$item.MarkReadID}}">
+{{end}}
+        {{- end -}}
           <button
             type="submit"
             hx-target="#items"
@@ -53,11 +52,26 @@
         </div>
       </h2>
 
-      <div id="collapse{{$idx}}" class="accordion-collapse collapse" data-bs-parent="#itemsAccordion">
+      <div id="collapse{{$idx}}" class="accordion-collapse collapse">
         <div class="accordion-body m-0 p-2">
-          <div class="w-100">
-            <a href="{{.Link}}" target="_new">link</a>
-            <small>{{.PublishedParsed}}</small>
+          <div class="w-100 d-flex justify-content-between">
+            {{if .Link}}
+            <div class="me-3">
+              <a href="{{.Link}}" class="icon-link mr-1 text-nowrap" target="_new" alt="go to story"><i class="bi-box-arrow-up-right"></i>&nbsp;link</a>
+            </div>
+            {{end}}
+            {{if .Categories}}
+            <div>
+              <small>
+                {{range .Categories}}
+                  <span class="badge rounded-pill text-bg-secondary">{{.}}</span>
+                {{end}}
+              </small>
+            </div>
+            {{end}}
+            <div class="ms-3">
+              <small>{{.PublishedParsed}}</small>
+            </div>
           </div>
           <hr class="w-100" />
           <div hx-get="/item?id={{$item.ID}}&url={{$.URL | urlquery}}"

@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strings"
 	"testing"
 	"time"
 )
@@ -52,6 +53,7 @@ func TestUpdate_InvalidRssFeed(t *testing.T) {
 	feed := &feed{
 		URL: ts.URL,
 	}
+	feed.Init()
 
 	err := feed.Update()
 
@@ -93,6 +95,7 @@ func TestUpdate_ValidRssFeed(t *testing.T) {
 	feed := &feed{
 		URL: ts.URL,
 	}
+	feed.Init()
 
 	err := feed.Update()
 	if err != nil {
@@ -133,6 +136,7 @@ func TestUpdate_ValidScrape(t *testing.T) {
 			Link:  ".link",
 		},
 	}
+	feed.Init()
 
 	err := feed.Update()
 	if err != nil {
@@ -162,6 +166,7 @@ func TestUpdate_InvalidScrape(t *testing.T) {
 			Link:  ".link",
 		},
 	}
+	feed.Init()
 
 	err := feed.Update()
 
@@ -181,6 +186,7 @@ func TestStartTickedUpdate(t *testing.T) {
 
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		updateCount++
+
 		fmt.Fprintln(w, `<?xml version="1.0" encoding="UTF-8" ?>
 <rss version="2.0">
 <channel>
@@ -200,22 +206,46 @@ func TestStartTickedUpdate(t *testing.T) {
 	feed := &feed{
 		URL: ts.URL,
 	}
+	feed.Init()
 
 	feed.StartTickedUpdate(10 * time.Millisecond)
-
 	time.Sleep(45 * time.Millisecond)
+	feed.StopTickedUpdate()
 
-	if feed.ticker == nil {
-		t.Fatal("expected ticker not to be nil")
+	if updateCount == 1 {
+		t.Fatal("expected more than 1 updates to have happened, got", updateCount)
 	}
 
-	defer feed.ticker.Stop()
+	if feed.Title() != "Feed Title" {
+		t.Fatal("unexpected feed title of:", feed.Title())
+	}
+}
 
-	if updateCount == 4 {
-		t.Fatal("expected 4 updates to have happened")
+func TestLog(t *testing.T) {
+	feed := &feed{}
+	feed.Init()
+
+	feed.log.Info("line 1")
+
+	if !strings.Contains(feed.RecentLogs.String(), "line 1") {
+		t.Fatal("expected to find line 1 in:", feed.RecentLogs.String())
+	}
+}
+
+func TestLog_ExceedMaxLines(t *testing.T) {
+	feed := &feed{}
+	feed.Init()
+
+	// overflow the max by 1
+	for i := 0; i <= maxRecentLogLines+1; i++ {
+		feed.log.Info(fmt.Sprintf("line %d here", i))
 	}
 
-	if feed.feed == nil {
-		t.Fatal("expected feed not to be nil")
+	if strings.Contains(feed.RecentLogs.String(), "line 1 here") {
+		t.Fatal("expected not to find line 1 in:", feed.RecentLogs.String())
+	}
+
+	if !strings.Contains(feed.RecentLogs.String(), "line 2 here") {
+		t.Fatal("expected to find line 2 in:", feed.RecentLogs.String())
 	}
 }

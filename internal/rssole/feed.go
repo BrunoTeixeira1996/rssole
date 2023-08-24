@@ -1,27 +1,67 @@
 package rssole
 
 import (
+	"bytes"
 	"crypto/md5"
 	"encoding/hex"
 	"fmt"
-	"log"
+	"io"
+	"os"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/mmcdole/gofeed"
+	"golang.org/x/exp/slog"
 )
 
 type feed struct {
-	URL      string  `json:"url"`
-	Name     string  `json:"name,omitempty"`     // optional override name
-	Category string  `json:"category,omitempty"` // optional grouping
-	Scrape   *scrape `json:"scrape,omitempty"`
+	URL        string            `json:"url"`
+	Name       string            `json:"name,omitempty"`     // optional override name
+	Category   string            `json:"category,omitempty"` // optional grouping
+	Scrape     *scrape           `json:"scrape,omitempty"`
+	RecentLogs *limitLinesBuffer `json:"-"`
 
 	ticker       *time.Ticker
 	feed         *gofeed.Feed
 	mu           sync.RWMutex
 	wrappedItems []*wrappedItem
+	log          *slog.Logger
+}
+
+const maxRecentLogLines = 30
+
+type limitLinesBuffer struct {
+	MaxLines int
+	*bytes.Buffer
+}
+
+func (llw *limitLinesBuffer) Write(p []byte) (int, error) {
+	n, err := llw.Buffer.Write(p)
+
+	numLines := strings.Count(llw.Buffer.String(), "\n")
+	if numLines > llw.MaxLines {
+		cappedLines := strings.Join(
+			strings.Split(llw.Buffer.String(), "\n")[numLines-maxRecentLogLines:],
+			"\n",
+		)
+
+		llw.Buffer.Reset()
+		llw.Buffer.WriteString(cappedLines)
+	}
+
+	return n, fmt.Errorf("limitLinesWriter error - %w", err)
+}
+
+func (f *feed) Init() {
+	f.RecentLogs = &limitLinesBuffer{
+		MaxLines: maxRecentLogLines,
+		Buffer:   bytes.NewBufferString(""),
+	}
+
+	th := slog.NewTextHandler(io.MultiWriter(os.Stdout, f.RecentLogs), nil)
+	f.log = slog.New(th).With("feed", f.URL)
 }
 
 func (f *feed) Link() string {
@@ -73,16 +113,21 @@ func (f *feed) Update() error {
 	fp := gofeed.NewParser()
 
 	if f.Scrape != nil {
+		f.log.Info("Scraping website pages", "urls", f.Scrape.URLs)
+
 		pseudoRss, err := f.Scrape.GeneratePseudoRssFeed()
 		if err != nil {
 			return fmt.Errorf("rss GeneratePseudoRssFeed %s %w", f.URL, err)
 		}
+
+		f.log.Info("Parsing pseudo feed")
 
 		feed, err = fp.ParseString(pseudoRss)
 		if err != nil {
 			return fmt.Errorf("rss parsestring %s %w", f.URL, err)
 		}
 	} else {
+		f.log.Info("Fetching and parsing feed", "url", f.URL)
 		feed, err = fp.ParseURL(f.URL)
 		if err != nil {
 			return fmt.Errorf("rss parseurl %s %w", f.URL, err)
@@ -93,12 +138,15 @@ func (f *feed) Update() error {
 	f.feed = feed
 	f.wrappedItems = make([]*wrappedItem, len(f.feed.Items))
 
+	f.log.Info("Items in feed", "length", len(f.feed.Items))
+
 	for idx, item := range f.feed.Items {
-		f.wrappedItems[idx] = &wrappedItem{
-			IsUnread: readLut.isUnread(item.Link),
-			Feed:     f,
-			Item:     item,
+		wItem := &wrappedItem{
+			Feed: f,
+			Item: item,
 		}
+		wItem.IsUnread = readLut.isUnread(wItem.MarkReadID())
+		f.wrappedItems[idx] = wItem
 	}
 
 	sort.Slice(f.wrappedItems, func(i, j int) bool {
@@ -129,7 +177,9 @@ func (f *feed) Update() error {
 
 	f.mu.Unlock()
 
-	log.Println("Updated:", f.URL)
+	f.log.Info("Finished updating feed")
+
+	updateLastmodified()
 
 	return nil
 }
@@ -139,17 +189,17 @@ func (f *feed) StartTickedUpdate(updateTime time.Duration) {
 		return // already running
 	}
 
+	f.log.Info("Starting feed update ticker", "duration", updateTime)
+	f.ticker = time.NewTicker(updateTime)
+
 	go func() {
 		if err := f.Update(); err != nil {
-			log.Println("error during update of", f.URL, err)
+			f.log.Error("update failed", "error", err)
 		}
 
-		log.Println("Starting update ticker of", updateTime, "for", f.URL)
-
-		f.ticker = time.NewTicker(updateTime)
 		for range f.ticker.C {
 			if err := f.Update(); err != nil {
-				log.Println("error during update of", f.URL, err)
+				f.log.Error("update failed", "error", err)
 			}
 		}
 	}()
@@ -157,7 +207,7 @@ func (f *feed) StartTickedUpdate(updateTime time.Duration) {
 
 func (f *feed) StopTickedUpdate() {
 	if f.ticker != nil {
-		log.Println("Stopped update ticker for", f.URL)
+		f.log.Info("Stopped update ticker")
 		f.ticker.Stop()
 		f.ticker = nil
 	}
