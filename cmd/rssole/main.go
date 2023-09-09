@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"log"
 	"os"
 	"time"
 
@@ -54,8 +55,6 @@ func handleFlags(configFilename, configReadCacheFilename *string) {
 	gokrazyFlag := flag.Bool("gokrazy", false, "use this if you are using gokrazy")
 
 	flag.Parse()
-}
-
 
 	if *gokrazyFlag {
 		// copy required files to /perm/home/rssole/
@@ -70,6 +69,7 @@ func handleFlags(configFilename, configReadCacheFilename *string) {
 		}
 	}
 
+}
 
 func loadConfig(configFilename string) rssole.ConfigSection {
 	cfg, err := getFeedsFileConfigSection(configFilename)
