@@ -48,12 +48,13 @@ var (
 )
 
 func init() {
-	loc, err := time.LoadLocation("GMT")
+	/*loc, err := time.LoadLocation("GMT")
 	if err != nil {
 		panic(err)
 	}
-
-	gmtTimeZoneLocation = loc
+	*/
+	gmtTimeZoneLocation = time.UTC
+	//gmtTimeZoneLocation = loc
 }
 
 const maxRecentLogLines = 30
