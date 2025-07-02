@@ -114,6 +114,13 @@
     {
       "url": "https://hackaday.com/blog/feed/",
       "category": "Nerd"
+    },
+    {
+      "url": "https://www.youtube.com/feeds/videos.xml?channel_id=UCgye4RmWOR8AmleinMxgbYw",
+      "category": "YouTube"
+    },
+    {
+      "url": "https://movieweb.com/feed/"
     }
   ]
 }

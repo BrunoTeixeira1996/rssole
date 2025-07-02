@@ -1,18 +1,21 @@
 package rssole
 
 import (
-	"bytes"
 	"crypto/md5"
 	"encoding/hex"
+	"fmt"
+	"log/slog"
 	"net/url"
-	"regexp"
 	"strings"
 	"sync"
 
+	htmltomarkdown "github.com/JohannesKaufmann/html-to-markdown/v2"
+	"github.com/gomarkdown/markdown"
+	"github.com/gomarkdown/markdown/html"
+	"github.com/gomarkdown/markdown/parser"
 	"github.com/k3a/html2text"
 	"github.com/mmcdole/gofeed"
-	"golang.org/x/exp/slog"
-	"golang.org/x/net/html"
+	"github.com/mpvl/unique"
 )
 
 type wrappedItem struct {
@@ -20,11 +23,10 @@ type wrappedItem struct {
 	Feed     *feed
 	*gofeed.Item
 
-	summary                    *string
-	description                *string
-	descriptionImagesForDedupe *[]string
-	images                     *[]string
-	onceDescription            sync.Once
+	summary         *string
+	description     *string
+	images          *[]string
+	onceDescription sync.Once
 }
 
 func (w *wrappedItem) MarkReadID() string {
@@ -46,14 +48,9 @@ func (w *wrappedItem) Images() []string {
 
 	images := []string{}
 
-	// NOTE: we exclude images that already appear in the description (gibiz)
-
 	// standard supplied image
 	if w.Item.Image != nil {
-		if !w.isDescriptionImage(w.Item.Image.URL) {
-			// fmt.Println(w.Item.Image.URL)
-			images = append(images, w.Item.Image.URL)
-		}
+		images = append(images, w.Item.Image.URL)
 	}
 
 	// mastodon/gibiz images
@@ -62,11 +59,7 @@ func (w *wrappedItem) Images() []string {
 			for _, v := range content {
 				if v.Attrs["medium"] == "image" {
 					imageURL := v.Attrs["url"]
-					if !w.isDescriptionImage(imageURL) {
-						// fmt.Println(w.Description())
-						// fmt.Printf("%v = %+v\n", k, imageUrl)
-						images = append(images, imageURL)
-					}
+					images = append(images, imageURL)
 				}
 			}
 		}
@@ -91,136 +84,99 @@ func (w *wrappedItem) Images() []string {
 		}
 	}
 
-	w.images = &images
+	// Now... remove any meta images that are embedded in the description.
+	// Ignore any query string args.
+
+	dedupedImages := []string{}
+
+	// Remove any image sources already within the description...
+	for _, img := range images {
+		srcNoQueryString := strings.Split(img, "?")[0]
+		if !strings.Contains(w.Description(), srcNoQueryString) {
+			dedupedImages = append(dedupedImages, img)
+		} else {
+			slog.Info("dedeuped meta image as already found in content", "src", img)
+		}
+	}
+
+	// Remove any internal duplicates within the list...
+	unique.Strings(&dedupedImages)
+
+	w.images = &dedupedImages
 
 	return *w.images
 }
 
-func (w *wrappedItem) isDescriptionImage(src string) bool {
-	// strip anything after ? to get rid of query string part
-	srcNoQueryString := strings.Split(src, "?")[0]
-
-	if w.descriptionImagesForDedupe == nil {
-		// force lazy load if it hasn't already
-		_ = w.Description()
-	}
-
-	for _, v := range *w.descriptionImagesForDedupe {
-		// fmt.Println(v, "==", src)
-		if v == srcNoQueryString {
-			return true
-		}
-	}
-
-	return false
-}
-
-var (
-	tagsToRemoveRe  = regexp.MustCompile("script|style|link|meta|iframe|form")
-	attrsToRemoveRe = regexp.MustCompile("style|class|hx-.*|data-.*|srcset|width|height|sizes|loading|decoding|target")
-)
-
 func (w *wrappedItem) Description() string {
 	w.onceDescription.Do(func() {
-		// start with whichever is longer out of .Description or .Content
-		// (sites vary about which they use, we'll take the biggest)
-		desc := &w.Item.Description
-		if len(w.Item.Content) > len(*desc) {
-			desc = &w.Item.Content
+		// create a list of descriptions from various sources,
+		// we'll pick the longest later on.
+		descSources := []*string{
+			&w.Item.Description,
+			&w.Item.Content,
 		}
 
-		if len(*desc) == 0 { // uh-ho, no description - is it hidden somewhere else?
-			// youtube style media:group
-			group := w.Item.Extensions["media"]["group"]
-			if len(group) > 0 {
-				description := group[0].Children["description"]
-				if len(description) > 0 {
-					desc = &description[0].Value
-				}
+		// youtube style media:group ?
+		group := w.Item.Extensions["media"]["group"]
+		if len(group) > 0 {
+			description := group[0].Children["description"]
+			if len(description) > 0 {
+				descSources = append(descSources, &description[0].Value)
 			}
 		}
 
-		// try and sanitise any html
-		doc, err := html.Parse(strings.NewReader(*desc))
-		if err != nil {
-			// failed to sanitise, so just return as is...
-			slog.Warn("html.Parse failed, returning unsanitised content", "error", err)
+		// IFLS a10 ?
+		a10content := w.Item.Extensions["a10"]["content"]
+		if len(a10content) > 0 {
+			description := a10content[0].Value
+			if len(description) > 0 {
+				descSources = append(descSources, &description)
+			}
+		}
+
+		var desc *string
+
+		// pick the longest description as the story content
+		for _, d := range descSources {
+			if desc == nil || len(*desc) < len(*d) {
+				desc = d
+			}
+		}
+
+		// Now simplify the (potential) HTML by converting
+		// it to and from markdown.
+
+		// First convert rando HTML to Markdown....
+		doc, err := htmltomarkdown.ConvertString(*desc)
+
+		switch {
+		case err != nil:
+			slog.Warn("htmltomarkdown.ConvertString failed, returning unsanitised content", "error", err)
+
 			w.description = desc
-		} else {
-			w.descriptionImagesForDedupe = &[]string{}
-			toDelete := []*html.Node{}
+		case doc == "":
+			slog.Warn("htmltomarkdown.ConvertString result blank, using original.")
 
-			var f func(*html.Node)
-			f = func(n *html.Node) {
-				// fmt.Println(n)
-				if n.Type == html.ElementNode {
-					// fmt.Println(n.Data)
+			w.description = desc
+		default:
+			// parse markdown
+			p := parser.NewWithExtensions(parser.CommonExtensions | parser.AutoHeadingIDs | parser.NoEmptyLineBeforeBlock)
+			md := p.Parse([]byte(doc))
 
-					if tagsToRemoveRe.MatchString(n.Data) {
-						// fmt.Println("removing", n.Data, "tag")
-						toDelete = append(toDelete, n)
+			absRoot := ""
 
-						return
-					}
-
-					allowedAttrs := []html.Attribute{}
-					for i := range n.Attr {
-						if !attrsToRemoveRe.MatchString(n.Attr[i].Key) {
-							allowedAttrs = append(allowedAttrs, n.Attr[i])
-						}
-					}
-					n.Attr = allowedAttrs
-
-					if n.Data == "a" {
-						// fmt.Println("making", n.Data, "tag target new tab")
-						n.Attr = append(n.Attr, html.Attribute{
-							Namespace: "",
-							Key:       "target",
-							Val:       "_new",
-						})
-						// disable href if it starts with #
-						for i := range n.Attr {
-							if n.Attr[i].Key == "href" && n.Attr[i].Val[0] == '#' {
-								n.Attr[i].Key = "xxxhref" // easier than removing the attr
-
-								break
-							}
-						}
-					}
-
-					if n.Data == "img" || n.Data == "svg" {
-						// fmt.Println("making", n.Data, "tag style max-width 60%")
-						n.Attr = append(n.Attr, html.Attribute{
-							Namespace: "",
-							Key:       "style",
-							Val:       "max-width: 60%;",
-						})
-						// keep a note of images so we can de-dupe attached
-						// images that also appear in the content.
-						for _, a := range n.Attr {
-							if a.Key == "src" {
-								// strip anything after ? to get rid of query string part
-								bits := strings.Split(a.Val, "?")
-								*w.descriptionImagesForDedupe = append(*w.descriptionImagesForDedupe, bits[0])
-							}
-						}
-					}
-				}
-
-				for c := n.FirstChild; c != nil; c = c.NextSibling {
-					f(c)
-				}
-			}
-			f(doc)
-
-			for _, n := range toDelete {
-				n.Parent.RemoveChild(n)
+			if u, err := url.Parse(w.Link); err == nil {
+				// some stories (e.g. Go Blog) have root relative links, so we need to supply a root (of the site, not story).
+				absRoot = fmt.Sprintf("%s://%s", u.Scheme, u.Host)
 			}
 
-			renderBuf := bytes.NewBufferString("")
-			_ = html.Render(renderBuf, doc)
-			desc := renderBuf.String()
-			w.description = &desc
+			// render to HTML (we choose to exclude embedded images and rely on them being passed in metadata)
+			renderer := html.NewRenderer(html.RendererOptions{
+				AbsolutePrefix: absRoot,
+				Flags:          html.CommonFlags | html.HrefTargetBlank,
+			})
+			mdHTML := string(markdown.Render(md, renderer))
+			w.description = &mdHTML
 		}
 	})
 
@@ -234,10 +190,12 @@ func (w *wrappedItem) Summary() string {
 		return *w.summary
 	}
 
-	plainDesc := html2text.HTML2TextWithOptions(w.Description(), html2text.WithLinksInnerText())
+	plainDesc := html2text.HTML2TextWithOptions(w.Description())
 	if len(plainDesc) > maxDescriptionLength {
 		plainDesc = plainDesc[:maxDescriptionLength]
 	}
+
+	plainDesc = strings.TrimSpace(plainDesc)
 
 	// if summary is identical to title return nothing
 	if plainDesc == w.Title {

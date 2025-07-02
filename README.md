@@ -1,26 +1,48 @@
 ![badge](./badge.svg) ![workflow status](https://github.com/TheMightyGit/rssole/actions/workflows/build.yml/badge.svg) [![Go Report Card](https://goreportcard.com/badge/github.com/TheMightyGit/rssole)](https://goreportcard.com/report/github.com/TheMightyGit/rssole)
 
-# rssole (aka rissole)
+# rssole
 
-An RSS Reader inspired by the late Google Reader. Runs on your local machine or local network serving your RSS feeds via a clean responsive web interface.
+An absolutely no frills RSS Reader inspired by the late Google Reader. Runs on
+your local machine or local network serving your RSS feeds via a clean
+responsive web interface.
 
 ![Screenshot 2023-08-10 at 14 21 53](https://github.com/TheMightyGit/rssole/assets/888751/a44ae604-72a4-4e92-8ed7-5580663eaf0c)
 
-A single executable with a single config file that can largely be configured within the web UI.
+A single executable with a single config file that can largely be configured
+within the web UI.
 
-Its greatest feature is the lack of excess features. It tries to do a simple job well and not get in the way.
+Its greatest feature is the lack of excess features. It tries to do a simple
+job well and not get in the way.
 
 ## Background
 
-I really miss Google Reader. Recently I noticed I'd gone back to an old habbit of jumping between various sites to scan their headlines, maintaining that sitelist purely in my head. So I looked at a few of the well knows RSS readers out there and nothing really grabbed me, either I didn't like the UI, or the install process seemed overly complicated, or there were just too many features, or ads. I like things simple.
+I really miss Google Reader, and I really like simplicity. So I made this
+non-SaaS ode to Google Reader so I can triage my incoming information in one
+place with one interface in a way I like. At heart this is a very self serving
+project solely based around my needs, and because of that it's something I use
+constantly. Hopefully it's of use to some other people, or you can build upon
+it (MIT license, do what you want to it - make it comfortable for you).
 
-So I made this non-SaaS ode to Google Reader so I can triage my incoming information in one place with one interface in a way I like. At heart this is a very self serving project solely based around my needs, and because of that it's something I use constantly. Hopefully it's of use to some other people, or you can build upon it (MIT license, do what you want to it - make it comfortable for you).
+## Advantages/Limitations
 
-The name is supposed to be a pun on 'rissole'. As well as 'rissole' containing the letters R S and S, a rissole is a "*a compressed mixture of meat and spices, coated in breadcrumbs and fried*" and that struck me as similar to the role of an RSS reader (compressing the mixed meat of the internet into a handy faceful).
+I see these as advantages (so they are unlikely to be added as features), but
+some may see them as limitations...
+
+- Only shows what's in the feed currently, does not store stories beyond their
+  lifetime in the feed.
+- Doesn't try to fetch anything from the linked page, only shows info present
+  in the feed. The aim is not to keep you inside the RRS reader, if you want
+  more then follow the link to the origin site.
+- No bookmarks/favourites - you can already do this in the browser.
+- It's not multi-user, there is no login or security protection. It's not
+  intended as a SaaS product, it's just for you on your local machine or
+  network. But you can stick an authenticating HTTP proxy in front of it if you
+  wish.
 
 ## Pre-Built Binaries and Packages
 
-Check out the [Releases](https://github.com/TheMightyGit/rssole/releases/) section in github, there should be a good selection of pre-built binaries
+Check out the [Releases](https://github.com/TheMightyGit/rssole/releases/)
+section in github, there should be a good selection of pre-built binaries
 and packages for various platforms.
 
 ## Installing via Brew
@@ -39,7 +61,8 @@ $ go install github.com/TheMightyGit/rssole/cmd/rssole@latest
 
 ## Building
 
-NOTE: You can ignore the `Makefile`, that's really just a helper for me during development.
+NOTE: You can ignore the `Makefile`, that's really just a helper for me during
+development.
 
 To build for your local architecture/OS...
 
@@ -47,7 +70,8 @@ To build for your local architecture/OS...
 $ go build ./cmd/...
 ```
 
-It should also cross build for all the usual golang targets fine as well (as no CGO is used)...
+It should also cross build for all the usual golang targets fine as well (as no
+CGO is used)...
 
 ```console
 $ GOOS=linux GOARCH=amd64 go build ./cmd/...
@@ -90,8 +114,8 @@ $ rssole
 
 Double click on the file, I guess.
 
-If your system has restrictions on which binaries it will run then try compiling locally instead of
-using the pre-built binaries.
+If your system has restrictions on which binaries it will run then try
+compiling locally instead of using the pre-built binaries.
 
 ## Now read your feeds with your browser
 
@@ -99,18 +123,21 @@ Now open your browser on `<hostname/ip>:8090` e.g. http://localhost:8090
 
 ## Network Options
 
-By default it binds to `0.0.0.0:8090`, so it will be available on all network adaptors
-on your host. You can change this in the `feeds.json` config file.
+By default it binds to `0.0.0.0:8090`, so it will be available on all network
+adaptors on your host. You can change this in the `rssole.json` config file.
 
-I run rssole within a private network so this is good enough for me so that I can run it once but
-access it from all my devices. If you run this on an alien network then someone else can mess with
-the UI (there's no protection at all on it) - change the `listen` value in `feeds.json` to
-`127.0.0.1:8090` if you only want it to serve locally.
+I run rssole within a private network so this is good enough for me so that I
+can run it once but access it from all my devices. If you run this on an alien
+network then someone else can mess with the UI (there's no protection at all on
+it) - change the `listen` value in `rssole.json` to `127.0.0.1:8090` if you
+only want it to serve locally.
 
-If you want to protect rssole behind a username and password or encryption (because you want rssole wide
-open on the net so you can use it from anywhere) then you'll need a web proxy that can be configured
-to sit in front of it to provide that protection. I'm highly unlikely to add username/password or encryption
-directly to rssole as I don't need it. Maybe someone will create a docker image that autoconfigures all of that... maybe that someone is you?
+If you want to protect rssole behind a username and password or encryption
+(because you want rssole wide open on the net so you can use it from anywhere)
+then you'll need a web proxy that can be configured to sit in front of it to
+provide that protection. I'm highly unlikely to add username/password or
+encryption directly to rssole as I don't need it. Maybe someone will create a
+docker image that autoconfigures all of that... maybe that someone is you?
 
 ## Config
 
@@ -120,12 +147,12 @@ directly to rssole as I don't need it. Maybe someone will create a docker image 
 $ ./rssole -h
 Usage of ./rssole:
   -c string
-        config filename (default "feeds.json")
+        config filename (default "rssole.json")
   -r string
-        readcache location (default "readcache.json")
+        readcache location (default "rssole_readcache.json")
 ```
 
-### `feeds.json`
+### `rssole.json`
 
 There are two types of feed definition...
 
@@ -195,11 +222,15 @@ gok update -i brun0-pi
 
 ## Key Dependencies
 
-I haven't had to implement anything actually difficult, I just do a bit of plumbing.
-All the difficult stuff has been done for me by these projects...
+I haven't had to implement anything actually difficult, I just do a bit of
+plumbing. All the difficult stuff has been done for me by these projects...
 
 - github.com/mmcdole/gofeed - for reading all sorts of RSS formats.
 - github.com/andybalholm/cascadia - for css selectors during website scrapes.
+- github.com/JohannesKaufmann/html-to-markdown/v2 to convert HTML into Markdown
+  (thus sanitizing and simplifying it).
+- github.com/gomarkdown/markdown to render content markdown back to HTML.
 - github.com/k3a/html2text - for making a plain text summary of html.
-- HTMX - for the javascript framework (a b/e engineers delight).
-- Bootstrap 5 - for HTML niceness because I know it slightly better than the alternatives.
+- HTMX - for the javascript anti-framework (and a backend engineers delight).
+- Bootstrap 5 - for HTML niceness simply because I know it slightly better than
+  the alternatives.

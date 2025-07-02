@@ -4,8 +4,10 @@ import (
 	"bytes"
 	"crypto/md5"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"sort"
 	"strings"
@@ -28,6 +30,30 @@ type feed struct {
 	mu           sync.RWMutex
 	wrappedItems []*wrappedItem
 	log          *slog.Logger
+
+	eTag         string
+	lastModified time.Time
+}
+
+var (
+	ErrNotModified = errors.New("not modified")
+
+	gmtTimeZoneLocation *time.Location
+
+	httpClientTimeout = 30 * time.Second
+
+	httpClient = &http.Client{
+		Timeout: httpClientTimeout,
+	}
+)
+
+func init() {
+	loc, err := time.LoadLocation("GMT")
+	if err != nil {
+		panic(err)
+	}
+
+	gmtTimeZoneLocation = loc
 }
 
 const maxRecentLogLines = 30
@@ -105,10 +131,7 @@ func (f *feed) Items() []*wrappedItem {
 }
 
 func (f *feed) Update() error {
-	var (
-		err  error
-		feed *gofeed.Feed
-	)
+	var feed *gofeed.Feed
 
 	fp := gofeed.NewParser()
 
@@ -128,9 +151,62 @@ func (f *feed) Update() error {
 		}
 	} else {
 		f.log.Info("Fetching and parsing feed", "url", f.URL)
-		feed, err = fp.ParseURL(f.URL)
+
+		req, err := http.NewRequest(http.MethodGet, f.URL, nil)
+		if err != nil {
+			return fmt.Errorf("cannot create new request: %w", err)
+		}
+
+		req.Header.Set("User-Agent", "Gofeed/1.0")
+
+		if f.eTag != "" {
+			req.Header.Set("If-None-Match", fmt.Sprintf(`"%s"`, f.eTag))
+		}
+
+		req.Header.Set("If-Modified-Since", f.lastModified.In(gmtTimeZoneLocation).Format(time.RFC1123))
+
+		resp, err := httpClient.Do(req)
+
+		if err != nil {
+			return fmt.Errorf("unable to do request: %w", err)
+		}
+
+		if resp != nil {
+			defer func() {
+				ce := resp.Body.Close()
+				if ce != nil {
+					err = ce
+				}
+			}()
+		}
+
+		if resp.StatusCode == http.StatusNotModified {
+			f.freshenUrlsInReadCache()
+
+			return ErrNotModified
+		}
+
+		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+			return gofeed.HTTPError{
+				StatusCode: resp.StatusCode,
+				Status:     resp.Status,
+			}
+		}
+
+		feed, err = fp.Parse(resp.Body)
 		if err != nil {
 			return fmt.Errorf("rss parseurl %s %w", f.URL, err)
+		}
+
+		if eTag := resp.Header.Get("Etag"); eTag != "" {
+			f.eTag = eTag
+		}
+
+		if lastModified := resp.Header.Get("Last-Modified"); lastModified != "" {
+			parsed, err := time.ParseInLocation(time.RFC1123, lastModified, gmtTimeZoneLocation)
+			if err == nil {
+				f.lastModified = parsed
+			}
 		}
 	}
 
@@ -154,6 +230,7 @@ func (f *feed) Update() error {
 		if f.wrappedItems[i].IsUnread && !f.wrappedItems[j].IsUnread {
 			return true
 		}
+
 		if !f.wrappedItems[i].IsUnread && f.wrappedItems[j].IsUnread {
 			return false
 		}
@@ -179,9 +256,21 @@ func (f *feed) Update() error {
 
 	f.log.Info("Finished updating feed")
 
+	f.freshenUrlsInReadCache()
+
+	readLut.persistReadLut()
+
 	updateLastmodified()
 
 	return nil
+}
+
+func (f *feed) freshenUrlsInReadCache() {
+	// extend the life of anything valid still in the
+	// read cache.
+	for _, wi := range f.wrappedItems {
+		readLut.extendLifeIfFound(wi.MarkReadID())
+	}
 }
 
 func (f *feed) StartTickedUpdate(updateTime time.Duration) {
@@ -203,6 +292,13 @@ func (f *feed) StartTickedUpdate(updateTime time.Duration) {
 			}
 		}
 	}()
+}
+
+func (f *feed) ChangeTickedUpdate(d time.Duration) {
+	if f.ticker != nil {
+		f.log.Info("Update ticker", "update", d)
+		f.ticker.Reset(d)
+	}
 }
 
 func (f *feed) StopTickedUpdate() {

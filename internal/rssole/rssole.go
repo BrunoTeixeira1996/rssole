@@ -59,7 +59,7 @@ func loadTemplates() error {
 }
 
 func Start(configFilename, configReadCacheFilename, listenAddress string, updateTime time.Duration) error {
-	slog.Info("RiSSOLE", "version", Version)
+	slog.Info("RSSOLE", "version", Version)
 
 	err := loadTemplates()
 	if err != nil {
@@ -77,15 +77,19 @@ func Start(configFilename, configReadCacheFilename, listenAddress string, update
 	allFeeds.UpdateTime = updateTime
 	allFeeds.BeginFeedUpdates()
 
-	http.HandleFunc("/", index)
-	http.HandleFunc("/feeds", feedlist)
-	http.HandleFunc("/items", items)
-	http.HandleFunc("/item", item)
-	http.HandleFunc("/crudfeed", crudfeed)
+	http.HandleFunc("GET /{$}", index)
+	http.HandleFunc("GET /feeds", feedlist)
+	http.HandleFunc("GET /items", items)
+	http.HandleFunc("POST /items", items)
+	http.HandleFunc("GET /item", item)
+	http.HandleFunc("GET /crudfeed", crudfeedGet)
+	http.HandleFunc("POST /crudfeed", crudfeedPost)
+	http.HandleFunc("GET /settings", settingsGet)
+	http.HandleFunc("POST /settings", settingsPost)
 
 	// As the static files won't change we force the browser to cache them.
 	httpFS := http.FileServer(http.FS(wwwlibs))
-	http.Handle("/libs/", forceCache(httpFS))
+	http.Handle("GET /libs/", forceCache(httpFS))
 
 	slog.Info("Listening", "address", listenAddress)
 

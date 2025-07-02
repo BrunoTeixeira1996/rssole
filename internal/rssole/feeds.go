@@ -16,7 +16,6 @@ type feeds struct {
 	Config     ConfigSection `json:"config"`
 	Feeds      []*feed       `json:"feeds"`
 	UpdateTime time.Duration `json:"-"`
-	Selected   string        `json:"-"` // FIXME: Ugh! viewer state held here is bad as we coud have multiple simultaneous viewers.
 	mu         sync.RWMutex
 	filename   string
 }
@@ -133,5 +132,15 @@ func (f *feeds) BeginFeedUpdates() {
 
 	for _, feed := range f.Feeds {
 		feed.StartTickedUpdate(f.UpdateTime)
+	}
+}
+
+func (f *feeds) ChangeTickedUpdate(d time.Duration) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	f.Config.UpdateSeconds = int(d.Seconds())
+	for _, feed := range f.Feeds {
+		feed.ChangeTickedUpdate(d)
 	}
 }

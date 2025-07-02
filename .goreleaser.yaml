@@ -1,3 +1,5 @@
+version: 2
+
 before:
   hooks:
     - go mod tidy
@@ -28,7 +30,7 @@ archives:
     - goos: windows
       format: zip
     files:
-      - feeds.json
+      - rssole.json
 
 brews:
   -
@@ -55,7 +57,7 @@ checksum:
   name_template: 'checksums.txt'
 
 snapshot:
-  name_template: "{{ incpatch .Version }}-next"
+  version_template: "{{ incpatch .Version }}-next"
 
 changelog:
   sort: asc
